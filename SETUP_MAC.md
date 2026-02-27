@@ -17,6 +17,14 @@ python dl24_cli.py scan --timeout 10
 
 ## 3) Læs live data
 
+Nem menu-app (anbefalet):
+
+```bash
+python dl24_easy.py
+```
+
+Direkte kommando:
+
 ```bash
 python dl24_cli.py monitor --address AA:BB:CC:DD:EE:FF --interval 0.5
 ```

@@ -5,6 +5,7 @@ Ren og genbrugelig mappe til styring af Atorch DL24P via BLE.
 ## Indhold
 
 - `dl24p_control/` – genbrugeligt Python library
+- `dl24_easy.py` – nem menu-app til daglig brug (scan, monitor, MPPT)
 - `dl24_cli.py` – nem CLI (`scan`, `monitor`, `quick-on`, `quick-off`)
 - `examples_mppt_cc.py` – eksempel på MPPT-lignende CC-regulering
 - `requirements.txt`
@@ -23,6 +24,20 @@ Scan efter enhed:
 ```bash
 python dl24_cli.py scan --timeout 10
 ```
+
+## Nem app (anbefalet)
+
+Start menu-app:
+
+```bash
+python dl24_easy.py
+```
+
+Her kan du vælge:
+- scan og gem adresse
+- quick on/off
+- live monitor (med valgfri CSV logging)
+- MPPT-CC med justerbare parametre
 
 Live data hver 0.5 s:
 
