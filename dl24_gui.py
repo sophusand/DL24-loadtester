@@ -173,7 +173,7 @@ def index():
 <body>
   <h2>DL24P Mac Controller (Web GUI)</h2>
 
-  <div class='card'>
+    <div class='card'>
     <div class='row'>
       <button onclick='scan()'>Scan</button>
       <span id='scanResult'></span>
@@ -189,11 +189,13 @@ def index():
       <input id='csv' placeholder='fx dl24_log.csv' size='20'>
     </div>
     <div class='row'>
+            <button onclick='testConnection()'>Test Connection</button>
       <button onclick='postAction("toggle")'>Quick ON/OFF</button>
       <button onclick='postAction("monitor")'>Start Monitor</button>
       <button onclick='postAction("mppt")'>Start MPPT</button>
       <button onclick='postAction("stop")'>Stop</button>
       <strong>Mode: <span id='mode'>idle</span></strong>
+            <strong>Status: <span id='conn'>unknown</span></strong>
     </div>
   </div>
 
@@ -227,9 +229,20 @@ async function postAction(mode){
   };
   await fetch('/api/'+mode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 }
+async function testConnection(){
+    const address=document.getElementById('address').value.trim();
+    const r=await fetch('/api/test_connection',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({address})});
+    const j=await r.json();
+    const el=document.getElementById('conn');
+    if(j.ok){el.textContent='connected';el.style.color='green';}
+    else{el.textContent='failed';el.style.color='red';}
+}
 async function refresh(){
   const r=await fetch('/api/status'); const s=await r.json();
   document.getElementById('mode').textContent=s.mode;
+    const conn=document.getElementById('conn');
+    if(s.running || s.reading){conn.textContent='connected';conn.style.color='green';}
+    else{conn.textContent='idle';conn.style.color='gray';}
   if(s.reading){
     document.getElementById('v').textContent=s.reading.voltage.toFixed(3);
     document.getElementById('a').textContent=s.reading.current.toFixed(3);
@@ -331,6 +344,26 @@ def api_stop():
     stop_worker()
     STATE.log("Stoppet")
     return jsonify({"ok": True})
+
+
+@app.post("/api/test_connection")
+def api_test_connection():
+    data = request.get_json(silent=True) or {}
+    address = (data.get("address") or STATE.address or "").strip()
+    if not address:
+        return jsonify({"ok": False, "error": "address missing"}), 400
+
+    async def run_test():
+        async with DL24Client(address):
+            await asyncio.sleep(0.2)
+
+    try:
+        asyncio.run(run_test())
+        STATE.log(f"Connection OK: {address}")
+        return jsonify({"ok": True})
+    except Exception as exc:
+        STATE.log(f"Connection FAIL: {exc}")
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 def main():
