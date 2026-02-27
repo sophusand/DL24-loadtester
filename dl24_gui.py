@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 
 import asyncio
+import csv
 import queue
 import threading
 import tkinter as tk
+from collections import deque
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from tkinter import ttk
+
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 
 from dl24p_control import DL24Client
 
@@ -31,11 +38,19 @@ class DL24GuiApp:
         self.interval_var = tk.StringVar(value="0.5")
         self.deadband_var = tk.StringVar(value="0.05")
         self.mode_var = tk.StringVar(value="Idle")
+        self.csv_enabled_var = tk.BooleanVar(value=False)
+        self.csv_file_var = tk.StringVar(value="")
 
         self.voltage_var = tk.StringVar(value="-")
         self.current_var = tk.StringVar(value="-")
         self.power_var = tk.StringVar(value="-")
         self.temp_var = tk.StringVar(value="-")
+
+        self.t_points = deque(maxlen=300)
+        self.v_points = deque(maxlen=300)
+        self.a_points = deque(maxlen=300)
+        self.p_points = deque(maxlen=300)
+        self.start_time = None
 
         self._build_ui()
         self.root.after(150, self._drain_events)
@@ -62,6 +77,12 @@ class DL24GuiApp:
         ttk.Label(controls, text="Mode:").pack(side=tk.LEFT, padx=(16, 4))
         ttk.Label(controls, textvariable=self.mode_var).pack(side=tk.LEFT)
 
+        csv_controls = ttk.Frame(self.root, padding=(10, 0, 10, 6))
+        csv_controls.pack(fill=tk.X)
+        ttk.Checkbutton(csv_controls, text="CSV log", variable=self.csv_enabled_var).pack(side=tk.LEFT)
+        ttk.Entry(csv_controls, textvariable=self.csv_file_var, width=45).pack(side=tk.LEFT, padx=6)
+        ttk.Button(csv_controls, text="Auto filnavn", command=self.set_auto_csv_name).pack(side=tk.LEFT)
+
         readings = ttk.LabelFrame(self.root, text="Live data", padding=10)
         readings.pack(fill=tk.X, padx=10, pady=6)
 
@@ -69,6 +90,21 @@ class DL24GuiApp:
         self._reading_line(readings, 1, "Current (A)", self.current_var)
         self._reading_line(readings, 2, "Power (W)", self.power_var)
         self._reading_line(readings, 3, "Temp (C)", self.temp_var)
+
+        graph_frame = ttk.LabelFrame(self.root, text="Live graf", padding=8)
+        graph_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
+
+        self.fig = Figure(figsize=(7, 3.2), dpi=100)
+        self.ax_v = self.fig.add_subplot(211)
+        self.ax_a = self.fig.add_subplot(212)
+        self.ax_v.set_ylabel("Volt")
+        self.ax_a.set_ylabel("Amp")
+        self.ax_a.set_xlabel("Tid (s)")
+        self.ax_v.grid(True, alpha=0.3)
+        self.ax_a.grid(True, alpha=0.3)
+
+        self.canvas = FigureCanvasTkAgg(self.fig, master=graph_frame)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
         log_frame = ttk.LabelFrame(self.root, text="Log", padding=10)
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(6, 10))
@@ -87,8 +123,64 @@ class DL24GuiApp:
     def _start_worker(self, target):
         self.stop_worker()
         self.stop_event.clear()
+        self.start_time = None
+        self.t_points.clear()
+        self.v_points.clear()
+        self.a_points.clear()
+        self.p_points.clear()
+        self._redraw_graph()
         self.worker_thread = threading.Thread(target=target, daemon=True)
         self.worker_thread.start()
+
+    def _resolve_csv_path(self) -> Path | None:
+        if not self.csv_enabled_var.get():
+            return None
+        raw = self.csv_file_var.get().strip()
+        if raw == "":
+            self.set_auto_csv_name()
+            raw = self.csv_file_var.get().strip()
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        return path
+
+    def _append_csv(self, t_s: float, reading):
+        path = self._resolve_csv_path()
+        if path is None:
+            return
+        file_exists = path.exists()
+        with path.open("a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow(["t_s", "voltage_v", "current_a", "power_w", "temp_c", "crc_ok"])
+            writer.writerow([
+                f"{t_s:.3f}",
+                f"{reading.voltage:.6f}",
+                f"{reading.current:.6f}",
+                f"{reading.power:.6f}",
+                reading.temperature,
+                int(reading.crc_ok),
+            ])
+
+    def set_auto_csv_name(self):
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.csv_file_var.set(f"dl24_log_{stamp}.csv")
+
+    def _redraw_graph(self):
+        self.ax_v.clear()
+        self.ax_a.clear()
+
+        self.ax_v.set_ylabel("Volt")
+        self.ax_a.set_ylabel("Amp")
+        self.ax_a.set_xlabel("Tid (s)")
+        self.ax_v.grid(True, alpha=0.3)
+        self.ax_a.grid(True, alpha=0.3)
+
+        if self.t_points:
+            self.ax_v.plot(list(self.t_points), list(self.v_points), color="tab:blue")
+            self.ax_a.plot(list(self.t_points), list(self.a_points), color="tab:orange")
+
+        self.canvas.draw_idle()
 
     def stop_worker(self):
         if self.worker_thread and self.worker_thread.is_alive():
@@ -233,10 +325,24 @@ class DL24GuiApp:
                     self.log(f"Adresse sat til: {first_address}")
             elif kind == "reading":
                 reading = payload
+                if self.start_time is None:
+                    self.start_time = datetime.now().timestamp()
+                t_s = datetime.now().timestamp() - self.start_time
+
                 self.voltage_var.set(f"{reading.voltage:.3f}")
                 self.current_var.set(f"{reading.current:.3f}")
                 self.power_var.set(f"{reading.power:.3f}")
                 self.temp_var.set(f"{reading.temperature}")
+
+                self.t_points.append(t_s)
+                self.v_points.append(reading.voltage)
+                self.a_points.append(reading.current)
+                self.p_points.append(reading.power)
+                self._redraw_graph()
+                try:
+                    self._append_csv(t_s, reading)
+                except Exception as e:
+                    self.log(f"CSV fejl: {e}")
 
         self.root.after(150, self._drain_events)
 

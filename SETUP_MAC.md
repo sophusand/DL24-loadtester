@@ -23,6 +23,12 @@ Nem menu-app (anbefalet):
 python dl24_easy.py
 ```
 
+GUI app (mest brugervenlig):
+
+```bash
+python dl24_gui.py
+```
+
 Direkte kommando:
 
 ```bash

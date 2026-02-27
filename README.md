@@ -52,6 +52,8 @@ Brug knapperne i vinduet:
 - `Start Monitor` læser live data
 - `Start MPPT` kører MPPT-CC loop
 - `Stop` stopper monitor/MPPT
+- `CSV log` gemmer live data til fil
+- Live graf opdateres i vinduet (Volt/Amp)
 
 Live data hver 0.5 s:
 
